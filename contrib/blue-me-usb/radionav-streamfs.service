@@ -1,0 +1,22 @@
+# Mount the virtual disk and receive the encoded audio stream.
+
+# Declare service dependencies and startup ordering.
+[Unit]
+Description=RadioNav virtual USB disk
+PartOf=radionav-usb.target
+Before=radionav-audio.service radionav-gadget.service
+
+# Define runtime commands and process lifecycle settings.
+[Service]
+Type=exec
+# Recover a stale mount before recreating the mount directory.
+ExecStartPre=-/usr/bin/fusermount3 -uz /run/radionav-usb
+ExecStartPre=/usr/bin/install -d -m 755 /run/radionav-usb
+ExecStart=/opt/radionav-usb/streamfs 5000 /opt/radionav-usb/upstream/files/demo3/imagem.raw /run/radionav-usb
+ExecStartPost=/usr/bin/python3 /opt/radionav-usb/wait_ready.py
+ExecStopPost=-/usr/bin/fusermount3 -uz /run/radionav-usb
+KillSignal=SIGINT
+TimeoutStartSec=360
+TimeoutStopSec=15
+Restart=on-failure
+RestartSec=5

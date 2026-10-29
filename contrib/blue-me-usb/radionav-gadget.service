@@ -1,0 +1,17 @@
+# Expose the mounted virtual disk as a read-only USB storage device.
+
+# Declare service dependencies and startup ordering.
+[Unit]
+Description=Present RadioNav streaming disk on USB
+BindsTo=radionav-streamfs.service
+Requires=radionav-audio.service
+After=radionav-streamfs.service radionav-audio.service
+PartOf=radionav-usb.target
+
+# Define runtime commands and process lifecycle settings.
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/sbin/modprobe g_mass_storage file=/run/radionav-usb/imagem.raw ro=1 removable=1
+ExecStop=/sbin/modprobe -r g_mass_storage
+TimeoutStopSec=15

@@ -1,0 +1,12 @@
+# Group the streaming services for coordinated boot and shutdown.
+
+# Declare service dependencies and startup ordering.
+[Unit]
+Description=RadioNav Bluetooth over USB
+Requires=radionav-gadget.service
+Wants=radionav-streamfs.service radionav-audio.service
+After=radionav-gadget.service
+
+# Attach this target to normal system startup when enabled.
+[Install]
+WantedBy=multi-user.target

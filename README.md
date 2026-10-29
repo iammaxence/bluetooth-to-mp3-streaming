@@ -1,76 +1,88 @@
-# GambiConf 2024
+# Bluetooth to MP3 Streaming
 
-Este é o código referente à talk "Bluetooth pra quê? Fazendo streaming pela porta USB" apresentada na GambiConf 2024.
+Send phone audio to a USB MP3 player through a Raspberry Pi Zero W:
 
-## Compilando
+~~~text
+Phone → Bluetooth → PCM engine → LAME MP3 → streamfs → USB MP3 player
+~~~
 
-Primeiramente você precisa ter o golang instalado na sua máquina. O código foi feito para go 1.23, mas provavelmente versões próximas irão funcionar sem problema. Para compilar todos os demos, basta rodar o make:
+The playback engine used on the project's Pi is now the default implementation.
+There is no separate adaptive/ installation step.
 
-```sh
-make
-```
+## Raspberry Pi installation
 
-## Clock FS
+On the Pi, from your local checkout:
 
-A primeira demo consiste de um sistema de arquivos que contém apenas um arquivo dentro dele chamado `clock`. Para executar:
+~~~bash
+sudo bash contrib/blue-me-usb/install.sh
+sudo reboot
+~~~
 
-```sh
-mkdir -p ./mnt
-bin/clockfs ./mnt
-```
+The installer builds this checkout and uses its bundled disk image.
+It never clones another repository. System packages and missing Go modules
+still require Internet access.
 
-## Corrupt FS
+First Bluetooth pairing remains a manual step.
+See [the installation and pairing guide](contrib/blue-me-usb/README.md).
 
-O segundo demo consiste de um pequeno sistema de arquivos virtual que usa uma pasta real por trás e gera um FS contendo os mesmos arquivos. Porém, ao tentar ler esses outros arquivos, o FS corrompe eles em tempo real e de forma totalmente aleatória. Para executar:
+## Source layout
 
-```sh
-mkdir -p ./mnt
-bin/corruptfs files/demo2 ./mnt
-```
+- stream/: Go virtual disk, MP3 queue and TCP producer receiver.
+- cmd/streamfs.go: streaming filesystem entry point.
+- contrib/blue-me-usb/audio_bridge.py: Bluetooth capture and MP3 encoder bridge.
+- contrib/blue-me-usb/engine.py: current PCM buffering and playback-state engine.
+- files/demo3/: bundled disk image with the virtual 001.mp3 track.
+- corrupt/ and timestamp/: original demonstration components.
 
-## Stream FS
+## Verification and limits
 
-O terceiro e último demo é todo o objetivo da talk. Esse FS, uma vez montado, contém apenas um único arquivo, intercepta leituras dentro de uma imagem de disco. Para executar:
+Continuous playback was confirmed on the Pi with this audio engine.
+The newly consolidated installer still needs a complete fresh-card hardware test.
+The original car test used the earlier version; repeat car validation for updates.
 
-```sh
-mkdir -p ./mnt
-bin/streamfs 5000 files/demo3/imagem.raw ./mnt
-```
+The external player (for example VLC or Blue&Me) can read ahead and buffer **X
+seconds of the MP3** before playing them. X depends on the player and its settings;
+a delay of approximately **eight seconds was observed with VLC**. The corresponding
+buffering delay has not been measured on Blue&Me.
 
-⚠️ O demo hoje só funciona corretamente com a porta 5000 e tem alguns offsets parcialmente hard-coded (senão ia levar uns 10min na GambiConf para rodar). Talvez você precise ajustar isto caso mude os arquivos. Entretanto, os arquivos de exemplo são fornecidos neste repositório. Eles estão comprimidos (.tar.gz) e você deve extraí-los primeiramente.
+When playback is paused on the phone, the Pi stops forwarding fresh music from
+that playback generation and clears its own pending audio. It continues supplying
+valid MP3 silence to keep the virtual file readable. **This does not pause the
+external player:** it can keep playing music that it already holds in its own
+buffer. Track changes can likewise remain delayed behind previously buffered audio.
 
-Para enviar dados para o FS, você pode um reference stream ou qualquer outro streaming MP3 (ou até mesmo arquivos). Um exemplo é o abaixo:
+To synchronize playback, the Pi would need a **separate control channel** to tell
+the external player about pause, resume, and track changes. For a car, a CAN
+interface is a possible route, provided the correct commands and their effects on
+the installed RadioNav/Blue&Me are identified and verified. A PC player would need
+its own supported control interface. **This control channel is not implemented.**
+USB mass-storage reads currently carry the MP3 data, not these playback commands.
 
-```sh
-curl -L "https://streams.radiomast.io/ref-128k-mp3-stereo" > /dev/tcp/127.0.0.1/5000
-```
+A pause command alone would not guarantee resynchronization: resume and track
+changes would also need a verified way to discard or refresh the player's old
+buffer, so it starts consuming the current audio rather than replaying stale data.
 
-Não se esqueça de montar o disco também usando o USB Gadget Mass Storage:
+~~~mermaid
+flowchart TD
+    PHONE["Phone<br/>Music and playback status"]
+    PI["Raspberry Pi<br/>PCM engine and MP3 encoder"]
+    CONTROL["Proposed player control channel<br/>CAN for the car, if verified"]
 
-```sh
-sudo modprobe g_mass_storage file=$(pwd)/mnt/imagem.raw
-```
+    subgraph PLAYER["External player: VLC or Blue&Me"]
+        CACHE["Read-ahead buffer<br/>X seconds of MP3"]
+        PLAYBACK["MP3 decoding and playback"]
+    end
 
-Para testar local, sem utilizar o USB Gadget, também é possível montar a imagem do disco localmente. Isto pode ser feito utilizando funcionalidades normais do Linux, mas forneci também os arquivos `mount.sh` e `umount.sh` junto aos arquivos do demo 3 que auxiliam neste processo.
+    PHONE -->|"Bluetooth audio and AVRCP status"| PI
+    PI -->|"MP3 over USB<br/>Silence when paused"| CACHE
+    CACHE -->|"Previously buffered audio can still play"| PLAYBACK
+    PI -.->|"Not implemented"| CONTROL
+    CONTROL -.->|"Pause, resume, track-change handling"| PLAYBACK
+    CONTROL -.->|"Buffer reset or resynchronization to verify"| CACHE
+~~~
 
-Ah, e para testar via Bluetooth igual na palestra, precisa primeiro configurar o Bluetooth usando esta ferramenta: https://github.com/nicokaiser/rpi-audio-receiver. Lembre de habilitar A2DP!
+## Origin
 
-Feito isto, basta conectar na RPi com seu dispositivo (tipo o celular) e executar estes comandos:
-
-```sh
-sudo killall bluealsa-aplay
-arecord -D bluealsa:SRV=org.bluealsa,DEV=XX:XX:XX:XX:XX:XX,PROFILE=a2dp -f cd | lame -r -b 128 - - | nc 127.0.0.1 5000
-# onde XX:XX:XX:XX:XX:XX é o MAC do seu dispositivo Bluetooth.
-```
-
-## Parte elétrica
-
-Nem todo rádio dá conta da Raspberry Pi 4 fazendo boot (2 a 3A). Para isto, na talk eu utilizei um cabo USB-A -> USB-C modificado, onde o pino de 5V foi cortado. Conectado ao ground ("negativo") e ao 5V ("positivo") do lado do USB-C (o lado que vai para a Raspberry Pi), eu conectei uma trigger board de Power Delivery, que pode ser facilmente encontrada no AliExpress (pesquise por "trigger board pd", por exemplo). Essa trigger deve ser configurada para 5V, que é a voltagem esperada pela Pi. O fio dos 5V que vai para a porta USB A **não** deve ser conectado (ou vai possivelmente queimar teu rádio).
-
-Feito isto, a RPi recebia energia por um powerbank, porém os dados ainda passavam normalmente entre ela e o rádio.
-
-## Aviso de Isenção
-
-Este código é fornecido "como está" (as is), sem garantias de qualquer tipo, expressas ou implícitas. O uso é de sua inteira
-responsabilidade. Não me responsabilizo por quaisquer danos diretos, indiretos, incidentais ou consequenciais,
-decorrentes do uso deste código. Ah, e eu recomendo ter um extintor por perto. Vai que.
+Based on [rgsilva/gambiconf-usb-streaming](https://github.com/rgsilva/gambiconf-usb-streaming).
+Original project explanation:
+[Smartifying my hi-fi system](https://rgsilva.com/blog/smartifying-my-hi-fi-system/).

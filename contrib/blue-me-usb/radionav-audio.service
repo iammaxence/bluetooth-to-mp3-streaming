@@ -1,0 +1,18 @@
+# Capture Bluetooth PCM, encode MP3, and feed the USB streaming server.
+
+# Declare service dependencies and startup ordering.
+[Unit]
+Description=RadioNav Bluetooth to MP3
+Requires=radionav-streamfs.service bluealsa.service radionav-bluetooth.service
+After=radionav-streamfs.service bluealsa.service bluetooth.service radionav-bluetooth.service
+PartOf=radionav-usb.target
+
+# Define runtime commands and process lifecycle settings.
+[Service]
+# Keep status files outside the read-only FUSE mount.
+RuntimeDirectory=radionav-audio
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 /opt/radionav-usb/audio_bridge.py
+Restart=always
+RestartSec=3
+TimeoutStopSec=15

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
+	"io"
 	"os"
 	"path"
 	"syscall"
@@ -41,12 +42,19 @@ func (f *Filesystem) OnAdd(ctx context.Context) {
 	offsetMin := int64(-1)
 	offsetMax := int64(-1)
 
-	curBlock := make([]byte, 4)
-	for i := int64(0); i < stat.Size()-1; i++ {
-		_, err := diskFile.ReadAt(curBlock, i)
-		if err != nil {
-			panic(err)
+	// Cache sequential reads instead of issuing a system call for every byte.
+	block := make([]byte, 1024*1024)
+	blockStart := int64(-1)
+	blockSize := 0
+	for i := int64(0); i+4 <= stat.Size(); i++ {
+		if blockStart < 0 || i < blockStart || i+4 > blockStart+int64(blockSize) {
+			blockStart = i
+			blockSize, err = diskFile.ReadAt(block, i)
+			if err != nil && err != io.EOF {
+				panic(err)
+			}
 		}
+		curBlock := block[i-blockStart : i-blockStart+4]
 
 		if offsetMin < 0 &&
 			curBlock[0] == 0xBA &&
